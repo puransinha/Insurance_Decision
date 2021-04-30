@@ -1,88 +1,84 @@
 
+# -*- coding: utf-8 -*-
+
+from __future__ import division, print_function
+# coding=utf-8
 import sys
+import os
 import glob
 import re
-import tensorflow as tf
-# from gevent.pywsgi import WSGIServer
-
-# from tensorflow.compat.v1 import ConfigProto
-# from tensorflow.compat.v1 import InteractiveSession
-
-# config=ConfigProto()
-# config.gpu_options.per_process_gpu_memory_fraction=0.2
-# config.gpu_options.allow_growth=True
-# session= InteractiveSession(config=config)
-
 import numpy as np
-import os
-from flask import send_from_directory
+
+# Keras
+from tensorflow.keras.applications.imagenet_utils import preprocess_input, decode_predictions
 from tensorflow.keras.models import load_model
-from tensorflow.keras.applications.imagenet_utils import preprocess_input,decode_predictions
 from tensorflow.keras.preprocessing import image
-from tensorflow.keras.preprocessing.image import img_to_array
-from flask import Flask,redirect, url_for, request, render_template
-from flask_cors import CORS, cross_origin
 
-app= Flask(__name__)
+# Flask utils
+from flask import Flask, redirect, url_for, request, render_template
+from werkzeug.utils import secure_filename
+#from gevent.pywsgi import WSGIServer
+
+# Define a flask app
+app = Flask(__name__)
+
+# Model saved with Keras model.save()
+# MODEL_PATH ='model_resnet50.h5'
+
+# Load your trained model
+model = load_model(MODEL_PATH)
 
 
-dir_path = os.path.dirname(os.path.realpath(__file__))
-UPLOAD_FOLDER ='Dataset/Train'
-STATIC_FOLDER ='static'
-
-#load model
-model=load_model('malaria_vgg19.h5')
-
-#call model to predict an image
-def model_predict(full_path):
-    img = image.load_img(full_path, target_size=(224, 224))
+def model_predict(img_path, model):
+    img = image.load_img(img_path, target_size=(224, 224))
 
     # Preprocessing the image
-    img = np.expand_dims(img, axis=0)
-
+    x = image.img_to_array(img)
+    # x = np.true_divide(x, 255)
     ## Scaling
-    img = img * 1.0 / 255
-    predicted = model.predict(img)
-    return predicted
+    x=x/255
+    x = np.expand_dims(x, axis=0)
+   
 
+   
 
-@app.route("/")
-@cross_origin()
-def Home():
-    return render_template("home.html")
-
-#procesing uploaded file and predict it
-@app.route('/upload', methods=['GET', 'POST'])
-@cross_origin()
-def upload_file():
-    if request.method == 'GET':
-        return render_template('home.html')
+    preds = model.predict(x)
+    preds=np.argmax(preds, axis=1)
+    if preds==0:
+        preds="The Insurance is Required"
+    elif preds==1:
+        preds="Seems that Insurance is not Required"
     else:
-        try:
-            file=request.files['image']
-            full_name = os.path.join(UPLOAD_FOLDER, file.filename)
-            file.save(full_name)
-
-            indices = {0: 'PARASITIC (INFECTED CELL)', 1: 'Uninfected'}
-            result = model_predict(full_name)
-            print(result)
-            predicted_class = np.asscalar(np.argmax(result, axis=1))
-            accuracy = round(result[0][predicted_class] * 100, 2)
-            label = indices[predicted_class]
-            return render_template('result.html', image_file_name=file.filename, label=label, accuracy=accuracy)
-        except:
-            # flash("Please select the image first !!")
-            return render_template('home.html')
-
-@app.route('/uploads/<filename>')
-def send_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
+        preds="You are in critical range..."
+    
+    
+    return preds
 
 
+@app.route('/', methods=['GET'])
+def index():
+    # Main page
+    return render_template('index.html')
 
 
+@app.route('/predict', methods=['GET', 'POST'])
+def upload():
+    if request.method == 'POST':
+        # Get the file from post request
+        f = request.files['file']
+
+        # Save the file to ./uploads
+        basepath = os.path.dirname(__file__)
+        file_path = os.path.join(
+            basepath, 'uploads', secure_filename(f.filename))
+        f.save(file_path)
+
+        # Make prediction
+        preds = model_predict(file_path, model)
+        result=preds
+        return result
+    return None
 
 
-
-if __name__=='__main__':
-    app.run(debug=True)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5050, debug=True, use_reloader = True)
